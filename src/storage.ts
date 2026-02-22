@@ -51,7 +51,22 @@ export function loadFileData(id: string): FileData | null {
 }
 
 export function saveFileData(id: string, data: FileData): void {
-  localStorage.setItem(FILE_PREFIX + id, JSON.stringify(data));
+  try {
+    localStorage.setItem(FILE_PREFIX + id, JSON.stringify(data));
+  } catch {
+    // localStorage quota exceeded — try clearing source images to free space
+    try {
+      const tabs = loadTabs();
+      if (tabs) {
+        for (const tab of tabs.tabs) {
+          localStorage.removeItem(IMAGE_PREFIX + tab.id);
+        }
+      }
+      localStorage.setItem(FILE_PREFIX + id, JSON.stringify(data));
+    } catch {
+      // Still failing — silently drop the save
+    }
+  }
 }
 
 export function deleteFileData(id: string): void {
@@ -60,7 +75,11 @@ export function deleteFileData(id: string): void {
 }
 
 export function saveSourceImage(id: string, dataUrl: string): void {
-  localStorage.setItem(IMAGE_PREFIX + id, dataUrl);
+  try {
+    localStorage.setItem(IMAGE_PREFIX + id, dataUrl);
+  } catch {
+    // localStorage quota exceeded — non-fatal
+  }
 }
 
 export function loadSourceImage(id: string): string | null {

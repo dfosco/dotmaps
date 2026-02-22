@@ -2,6 +2,24 @@ import { LEGO_COLORS } from './colors';
 import { config } from './config';
 import type { Grid } from './types';
 
+// Deterministic non-linear 2D hash → [0, 1) with no visible spatial pattern
+function hash2d(x: number, y: number): number {
+  let h = Math.imul(x, 374761393) + Math.imul(y, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h = h ^ (h >>> 16);
+  return ((h & 0x7fffffff) / 0x7fffffff);
+}
+
+// Pick a water gradient color using dithered interpolation instead of hard bands
+function pickWaterGradient(t: number, x: number, y: number): string {
+  const tScaled = Math.max(0, Math.min(3, t * 3));
+  const lower = Math.min(2, Math.floor(tScaled));
+  const upper = lower + 1;
+  const frac = tScaled - lower;
+  const gi = hash2d(x, y) < frac ? upper : lower;
+  return WATER_GRADIENT[gi];
+}
+
 export function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -80,8 +98,8 @@ function closestLandColor(r: number, g: number, b: number): string {
   for (const pc of LAND_PALETTE) {
     let dist: number;
 
-    if (s < 0.08) {
-      // Near-achromatic pixel: use RGB Euclidean distance
+    if (s < 0.08 || (s < 0.25 && l > 0.75)) {
+      // Near-achromatic or barely-colored very-light pixel: use RGB Euclidean distance
       dist = ((r - pc.r) ** 2 + (g - pc.g) ** 2 + (b - pc.b) ** 2) / (255 * 255 * 3);
     } else {
       // Chromatic pixel: boost saturation to bridge the gap between
@@ -108,8 +126,9 @@ function isWaterPixel(r: number, g: number, b: number): boolean {
   const [h, s, l] = rgbToHsl(r, g, b);
   // Very dark pixels → water
   if (l < 0.15) return true;
-  // Blue/cyan hue range (roughly 170-260) with some saturation
-  if (s > 0.15 && h >= 170 && h <= 260) return true;
+  // Blue/cyan hue range — require more saturation for lighter pixels
+  // so ice/snow with a slight blue tint stays as land
+  if (h >= 170 && h <= 260 && s > 0.15 + Math.max(0, l - 0.5) * 0.8) return true;
   // Desaturated dark-to-mid tones with blue-ish tint
   if (l < 0.45 && s < 0.2 && b > r) return true;
   return false;
@@ -267,9 +286,7 @@ export function imageToGrid(
         const edgeNorm = distToEdge[i] / maxEdgeDist;
         // 0 = dark (far from land, near edge), 1 = light (near land, far from edge)
         const t = (1 - landNorm) * 0.7 + (1 - edgeNorm) * 0.3;
-        // WATER_GRADIENT: [black, dark blue, turquoise, light blue]
-        const gi = Math.min(3, Math.max(0, Math.floor(t * WATER_GRADIENT.length)));
-        grid[gy][gx] = WATER_GRADIENT[gi];
+        grid[gy][gx] = pickWaterGradient(t, gx, gy);
       } else {
         // Land: pick closest land color (no black), prioritise green/sage
         grid[gy][gx] = closestLandColor(r, g, b);
@@ -346,9 +363,6 @@ export function fixGridLimits(grid: Grid): Grid {
 
   const newGrid: Grid = grid.map((row) => [...row]);
 
-  // Golden ratio for deterministic spatial tie-breaking
-  const PHI = (1 + Math.sqrt(5)) / 2;
-
   const lightBlueHex = colorByName.get('light blue')!;
   const turquoiseHex = colorByName.get('turquoise')!;
   const darkBlueHex = colorByName.get('dark blue')!;
@@ -363,27 +377,23 @@ export function fixGridLimits(grid: Grid): Grid {
     const scored = positions.map(pos => {
       const landNorm = distToLand[pos.idx] < Infinity ? distToLand[pos.idx] / maxLandDist : 1;
       const edgeNorm = distToEdge[pos.idx] / maxEdgeDist;
-      // Small spatial jitter (golden-ratio hash) to break ties evenly across the map
-      const jitter = ((pos.row * PHI + pos.col * PHI * PHI) % 1) * 0.0001;
+      // Non-linear spatial jitter to break ties without diagonal artifacts
+      const jitter = hash2d(pos.row, pos.col) * 0.0001;
       let priority: number;
 
       if (isWaterColor) {
         if (hex === lightBlueHex) {
-          // Light blue: most valuable at coastlines (near land)
           priority = (1 - landNorm) + jitter;
         } else if (hex === turquoiseHex) {
-          // Turquoise: valuable near coastlines
           priority = (1 - landNorm) * 0.85 + edgeNorm * 0.15 + jitter;
         } else if (hex === darkBlueHex) {
-          // Dark blue: most valuable at moderate ocean depth
           priority = (1 - Math.abs(landNorm - 0.35)) + jitter;
         } else {
-          // Black in water: prefer keeping at deepest ocean / near edges
           priority = landNorm * 0.7 + (1 - edgeNorm) * 0.3 + jitter;
         }
       } else {
-        // Land: deterministic spatial hash for even distribution
-        priority = (pos.row * PHI + pos.col * PHI * PHI) % 1;
+        // Land: non-linear 2D hash for organic distribution (no diagonal stripes)
+        priority = hash2d(pos.row, pos.col);
       }
       return { ...pos, priority };
     });
@@ -399,8 +409,7 @@ export function fixGridLimits(grid: Grid): Grid {
         const landNorm = distToLand[pos.idx] < Infinity ? distToLand[pos.idx] / maxLandDist : 1;
         const edgeNorm = distToEdge[pos.idx] / maxEdgeDist;
         const t = (1 - landNorm) * 0.7 + (1 - edgeNorm) * 0.3;
-        const gi = Math.min(3, Math.max(0, Math.floor(t * WATER_GRADIENT.length)));
-        const idealHex = WATER_GRADIENT[gi];
+        const idealHex = pickWaterGradient(t, pos.col, pos.row);
 
         const candidates = [idealHex, ...WATER_GRADIENT.filter(wh => wh !== idealHex)];
         let assigned = false;
