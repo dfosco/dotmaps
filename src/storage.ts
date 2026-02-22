@@ -3,6 +3,7 @@ import type { Grid } from './types';
 const TABS_KEY = 'dotmaps-tabs';
 const FILE_PREFIX = 'dotmaps-file-';
 const IMAGE_PREFIX = 'dotmaps-img-';
+const ZOOM_PREFIX = 'dotmaps-zoom-';
 
 export interface FileTab {
   id: string;
@@ -72,6 +73,7 @@ export function saveFileData(id: string, data: FileData): void {
 export function deleteFileData(id: string): void {
   localStorage.removeItem(FILE_PREFIX + id);
   localStorage.removeItem(IMAGE_PREFIX + id);
+  localStorage.removeItem(ZOOM_PREFIX + id);
 }
 
 export function saveSourceImage(id: string, dataUrl: string): void {
@@ -84,4 +86,13 @@ export function saveSourceImage(id: string, dataUrl: string): void {
 
 export function loadSourceImage(id: string): string | null {
   return localStorage.getItem(IMAGE_PREFIX + id);
+}
+
+export function saveZoom(id: string, zoom: number): void {
+  try { localStorage.setItem(ZOOM_PREFIX + id, String(zoom)); } catch { /* quota */ }
+}
+
+export function loadZoom(id: string): number | null {
+  const v = localStorage.getItem(ZOOM_PREFIX + id);
+  return v ? parseFloat(v) : null;
 }

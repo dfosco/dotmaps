@@ -1,6 +1,22 @@
 import { LEGO_COLORS } from './colors';
 import { config } from './config';
-import type { Grid } from './types';
+import type { Cell, Grid } from './types';
+
+export interface RenderOptions {
+  waterDepth: number;       // 0–100, default 50
+  includeBlack: boolean;    // default true
+  colorVibrancy: number;    // 0–100, default 60
+  coastlineWidth: number;   // 0–100, default 70
+  waterSensitivity: number; // 0–100, default 50
+}
+
+export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
+  waterDepth: 50,
+  includeBlack: true,
+  colorVibrancy: 60,
+  coastlineWidth: 70,
+  waterSensitivity: 50,
+};
 
 // Deterministic non-linear 2D hash → [0, 1) with no visible spatial pattern
 function hash2d(x: number, y: number): number {
@@ -11,13 +27,14 @@ function hash2d(x: number, y: number): number {
 }
 
 // Pick a water gradient color using dithered interpolation instead of hard bands
-function pickWaterGradient(t: number, x: number, y: number): string {
-  const tScaled = Math.max(0, Math.min(3, t * 3));
+function pickWaterGradient(t: number, x: number, y: number, gradient: Cell[], depthBias: number): Cell {
+  const tAdj = Math.max(0, Math.min(1, t + depthBias));
+  const tScaled = Math.max(0, Math.min(3, tAdj * 3));
   const lower = Math.min(2, Math.floor(tScaled));
   const upper = lower + 1;
   const frac = tScaled - lower;
   const gi = hash2d(x, y) < frac ? upper : lower;
-  return WATER_GRADIENT[gi];
+  return gradient[gi];
 }
 
 export function hexToRgb(hex: string): [number, number, number] {
@@ -62,8 +79,11 @@ const PALETTE_HSL = LEGO_COLORS.map((c) => {
 // --- Color sets by config name ---
 const colorByName = new Map(config.colors.map((c) => [c.name, c.hex]));
 
+// Black hex from config — used for classification only, grid stores null for "black" (empty)
+const BLACK_HEX = colorByName.get('black')!;
+
 const WATER_HEXES = new Set([
-  colorByName.get('black'),
+  BLACK_HEX,
   colorByName.get('dark blue'),
   colorByName.get('turquoise'),
   colorByName.get('light blue'),
@@ -75,13 +95,23 @@ const LAND_HEXES = new Set(
     .map((c) => c.hex),
 );
 
-// Water gradient from darkest to lightest
-const WATER_GRADIENT = [
-  colorByName.get('black')!,
+// Water gradient from darkest to lightest (null = empty/black = no dot)
+const WATER_GRADIENT_WITH_BLACK: Cell[] = [
+  null,
   colorByName.get('dark blue')!,
   colorByName.get('turquoise')!,
   colorByName.get('light blue')!,
 ];
+const WATER_GRADIENT_NO_BLACK: Cell[] = [
+  colorByName.get('dark blue')!,
+  colorByName.get('dark blue')!,
+  colorByName.get('turquoise')!,
+  colorByName.get('light blue')!,
+];
+
+function getWaterGradient(opts: RenderOptions): Cell[] {
+  return opts.includeBlack ? WATER_GRADIENT_WITH_BLACK : WATER_GRADIENT_NO_BLACK;
+}
 
 const LAND_PALETTE = PALETTE_HSL.filter((c) => LAND_HEXES.has(c.hex)).map(c => {
   const [r, g, b] = hexToRgb(c.hex);
@@ -90,7 +120,7 @@ const LAND_PALETTE = PALETTE_HSL.filter((c) => LAND_HEXES.has(c.hex)).map(c => {
 
 // Land color matching: pre-boost saturation so muted map pixels
 // separate clearly against our vivid palette, then use hue-primary distance.
-function closestLandColor(r: number, g: number, b: number): string {
+function closestLandColor(r: number, g: number, b: number, boostFactor: number): string {
   const [h, s, l] = rgbToHsl(r, g, b);
   let bestDist = Infinity;
   let bestHex = LAND_PALETTE[0].hex;
@@ -105,7 +135,7 @@ function closestLandColor(r: number, g: number, b: number): string {
     } else {
       // Chromatic pixel: boost saturation to bridge the gap between
       // the muted source image and our vivid palette, then match on hue
-      const boostedS = Math.min(1, s * 2.5);
+      const boostedS = Math.min(1, s * boostFactor);
       const dh = Math.min(Math.abs(h - pc.h), 360 - Math.abs(h - pc.h)) / 180;
       const dl = l - pc.l;
       const ds = boostedS - pc.s;
@@ -123,13 +153,15 @@ function closestLandColor(r: number, g: number, b: number): string {
 }
 
 // --- Pixel classification ---
-function isWaterPixel(r: number, g: number, b: number): boolean {
+function isWaterPixel(r: number, g: number, b: number, sensitivity: number): boolean {
   const [h, s, l] = rgbToHsl(r, g, b);
+  // sensitivity 0–100, default 50. Higher = more pixels classified as water.
+  const darkThresh = 0.05 + sensitivity * 0.002;   // 0.05–0.25, default 0.15
+  const satBase = 0.30 - sensitivity * 0.003;       // 0.30–0.00, default 0.15
   // Very dark pixels → water
-  if (l < 0.15) return true;
+  if (l < darkThresh) return true;
   // Blue/cyan hue range — require more saturation for lighter pixels
-  // so ice/snow with a slight blue tint stays as land
-  if (h >= 170 && h <= 260 && s > 0.15 + Math.max(0, l - 0.5) * 1.4) return true;
+  if (h >= 170 && h <= 260 && s > satBase + Math.max(0, l - 0.5) * 1.4) return true;
   // Desaturated dark-to-mid tones with blue-ish tint
   if (l < 0.45 && s < 0.2 && b > r) return true;
   return false;
@@ -221,6 +253,7 @@ export function imageToGrid(
   gridWidth: number,
   gridHeight: number,
   detailRes?: number,
+  opts: RenderOptions = DEFAULT_RENDER_OPTIONS,
 ): Grid {
   // If detailRes is given, sample at a smaller size then nearest-neighbour upscale
   if (detailRes && detailRes < Math.max(gridWidth, gridHeight)) {
@@ -233,7 +266,7 @@ export function imageToGrid(
       sh = detailRes;
       sw = Math.max(1, Math.round(detailRes * aspect));
     }
-    const small = imageToGrid(imageData, sw, sh);
+    const small = imageToGrid(imageData, sw, sh, undefined, opts);
     const grid: Grid = Array.from({ length: gridHeight }, (_, r) => {
       const sr = Math.min(Math.floor((r * sh) / gridHeight), sh - 1);
       return Array.from({ length: gridWidth }, (_, c) => {
@@ -245,12 +278,16 @@ export function imageToGrid(
   }
 
   const buf = downsampleToBuffer(imageData, gridWidth, gridHeight);
+  const gradient = getWaterGradient(opts);
+  const depthBias = (50 - opts.waterDepth) / 100;
+  const boostFactor = 1.0 + (opts.colorVibrancy / 100) * 2.5;
+  const coastW = opts.coastlineWidth / 100;
 
   // 1) Classify each cell as water or land
   const isWater = new Array<boolean>(gridWidth * gridHeight);
   for (let i = 0; i < gridWidth * gridHeight; i++) {
     const r = buf[i * 3], g = buf[i * 3 + 1], b = buf[i * 3 + 2];
-    isWater[i] = isWaterPixel(r, g, b);
+    isWater[i] = isWaterPixel(r, g, b, opts.waterSensitivity);
   }
 
   // 2) Distance from each water cell to nearest land cell
@@ -282,15 +319,12 @@ export function imageToGrid(
       const b = Math.max(0, Math.min(255, buf[i * 3 + 2]));
 
       if (isWater[i]) {
-        // Water gradient: near land = light blue, far from land / near edge = black
         const landNorm = distToLand[i] < Infinity ? distToLand[i] / maxLandDist : 1;
         const edgeNorm = distToEdge[i] / maxEdgeDist;
-        // 0 = dark (far from land, near edge), 1 = light (near land, far from edge)
-        const t = (1 - landNorm) * 0.7 + (1 - edgeNorm) * 0.3;
-        grid[gy][gx] = pickWaterGradient(t, gx, gy);
+        const t = (1 - landNorm) * coastW + (1 - edgeNorm) * (1 - coastW);
+        grid[gy][gx] = pickWaterGradient(t, gx, gy, gradient, depthBias);
       } else {
-        // Land: pick closest land color (no black), prioritise green/sage
-        grid[gy][gx] = closestLandColor(r, g, b);
+        grid[gy][gx] = closestLandColor(r, g, b, boostFactor);
       }
     }
   }
@@ -308,11 +342,12 @@ export function fixGridLimits(grid: Grid): Grid {
   const limits = new Map(config.colors.map((c) => [c.hex, c.quantity]));
 
   // Classify each cell as water or land based on its current color
+  // null = black/empty = deepest water
   const cellIsWater: boolean[] = new Array(total);
   for (let r = 0; r < h; r++) {
     for (let c = 0; c < w; c++) {
       const hex = grid[r][c];
-      cellIsWater[r * w + c] = hex != null && WATER_HEXES.has(hex);
+      cellIsWater[r * w + c] = hex === null || WATER_HEXES.has(hex);
     }
   }
 
@@ -367,7 +402,6 @@ export function fixGridLimits(grid: Grid): Grid {
   const lightBlueHex = colorByName.get('light blue')!;
   const turquoiseHex = colorByName.get('turquoise')!;
   const darkBlueHex = colorByName.get('dark blue')!;
-  const blackHex = colorByName.get('black')!;
 
   for (const hex of overColors) {
     const positions = colorPositions.get(hex)!;
@@ -410,9 +444,11 @@ export function fixGridLimits(grid: Grid): Grid {
         const landNorm = distToLand[pos.idx] < Infinity ? distToLand[pos.idx] / maxLandDist : 1;
         const edgeNorm = distToEdge[pos.idx] / maxEdgeDist;
         const t = (1 - landNorm) * 0.7 + (1 - edgeNorm) * 0.3;
-        const idealHex = pickWaterGradient(t, pos.col, pos.row);
+        const idealCell = pickWaterGradient(t, pos.col, pos.row, WATER_GRADIENT_WITH_BLACK, 0);
 
-        const candidates = [idealHex, ...WATER_GRADIENT.filter(wh => wh !== idealHex)];
+        // Build candidate list from the gradient (only non-null colored entries)
+        const gradientHexes = WATER_GRADIENT_WITH_BLACK.filter((c): c is string => c !== null);
+        const candidates = idealCell ? [idealCell, ...gradientHexes.filter(wh => wh !== idealCell)] : gradientHexes;
         let assigned = false;
         for (const ch of candidates) {
           if (ch === hex) continue;
@@ -425,8 +461,8 @@ export function fixGridLimits(grid: Grid): Grid {
           }
         }
         if (!assigned) {
-          // Fallback to black (virtually unlimited)
-          newGrid[pos.row][pos.col] = blackHex;
+          // Fallback to empty (black = no dot)
+          newGrid[pos.row][pos.col] = null;
         }
       }
     } else {

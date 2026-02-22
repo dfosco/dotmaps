@@ -1,6 +1,8 @@
 import type { EditorState, EditorAction, Grid, UndoableState } from './types';
+import { config } from './config';
 
 const MAX_UNDO = 100;
+const BLACK_HEX = config.colors.find(c => c.name === 'black')?.hex ?? '#000000';
 
 // Actions that modify the grid and should be undoable
 const UNDOABLE_ACTIONS = new Set([
@@ -17,8 +19,8 @@ export function createInitialState(width = 48, height = 48, grid?: Grid): Undoab
     grid: grid ?? createGrid(width, height),
     width,
     height,
-    activeColor: '#CB1220',
-    activeTool: 'pen',
+    activeColor: '',
+    activeTool: 'hand',
     selection: { cells: new Set() },
   };
   return { present, past: [], future: [] };
@@ -29,14 +31,18 @@ function coreReducer(state: EditorState, action: EditorAction): EditorState {
     case 'PAINT': {
       const { row, col, color } = action;
       if (row < 0 || row >= state.height || col < 0 || col >= state.width) return state;
+      // Painting with black = erasing (black is absence of dot)
+      const value = color === BLACK_HEX ? null : color;
+      if (state.grid[row][col] === value) return state;
       const grid = state.grid.map((r, ri) =>
-        ri === row ? r.map((c, ci) => (ci === col ? color : c)) : r
+        ri === row ? r.map((c, ci) => (ci === col ? value : c)) : r
       );
       return { ...state, grid };
     }
     case 'ERASE': {
       const { row, col } = action;
       if (row < 0 || row >= state.height || col < 0 || col >= state.width) return state;
+      if (state.grid[row][col] === null) return state;
       const grid = state.grid.map((r, ri) =>
         ri === row ? r.map((c, ci) => (ci === col ? null : c)) : r
       );
@@ -87,7 +93,6 @@ function coreReducer(state: EditorState, action: EditorAction): EditorState {
     case 'RESIZE': {
       const { width, height } = action;
       const grid = createGrid(width, height);
-      // Copy existing data
       for (let r = 0; r < Math.min(height, state.height); r++) {
         for (let c = 0; c < Math.min(width, state.width); c++) {
           grid[r][c] = state.grid[r][c];
@@ -145,10 +150,31 @@ export function editorReducer(undoable: UndoableState, action: EditorAction): Un
     };
   }
 
+  if (action.type === 'STROKE_START') {
+    return { ...undoable, strokeAnchor: undoable.present };
+  }
+
+  if (action.type === 'STROKE_END') {
+    if (!undoable.strokeAnchor) return undoable;
+    if (undoable.present === undoable.strokeAnchor) {
+      return { ...undoable, strokeAnchor: undefined };
+    }
+    return {
+      past: [...undoable.past.slice(-MAX_UNDO + 1), undoable.strokeAnchor],
+      present: undoable.present,
+      future: [],
+      strokeAnchor: undefined,
+    };
+  }
+
   const newPresent = coreReducer(undoable.present, action);
   if (newPresent === undoable.present) return undoable;
 
   if (UNDOABLE_ACTIONS.has(action.type)) {
+    // During a stroke, accumulate changes without individual undo entries
+    if (undoable.strokeAnchor) {
+      return { ...undoable, present: newPresent };
+    }
     return {
       past: [...undoable.past.slice(-MAX_UNDO + 1), undoable.present],
       present: newPresent,
