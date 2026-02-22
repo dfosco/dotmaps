@@ -167,6 +167,9 @@ function App() {
         return;
       }
       switch (e.key.toLowerCase()) {
+        case 'h':
+          dispatch({ type: 'SET_TOOL', tool: 'hand' });
+          break;
         case 'p':
           dispatch({ type: 'SET_TOOL', tool: 'pen' });
           break;

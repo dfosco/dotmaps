@@ -35,6 +35,8 @@ function cellFromMouse(
 export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: CanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isPainting = useRef(false);
+  const isPanning = useRef(false);
+  const panStart = useRef<{ x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
   const selectStart = useRef<{ row: number; col: number } | null>(null);
   const selectCurrent = useRef<{ row: number; col: number } | null>(null);
 
@@ -139,6 +141,7 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
   const applyTool = useCallback(
     (row: number, col: number, tool: Tool, color: string) => {
       if (tool === 'pen') {
+        if (!color) return; // no color selected
         dispatch({ type: 'PAINT', row, col, color });
       } else if (tool === 'eraser') {
         dispatch({ type: 'ERASE', row, col });
@@ -147,10 +150,27 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
     [dispatch]
   );
 
+  const getScrollContainer = useCallback(() => {
+    return canvasRef.current?.closest('.canvas-area') as HTMLElement | null;
+  }, []);
+
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
+
+      if (activeTool === 'hand') {
+        isPanning.current = true;
+        const container = getScrollContainer();
+        panStart.current = {
+          x: e.clientX,
+          y: e.clientY,
+          scrollLeft: container?.scrollLeft ?? 0,
+          scrollTop: container?.scrollTop ?? 0,
+        };
+        return;
+      }
+
       const cell = cellFromMouse(canvas, e, width, height);
       if (!cell) return;
 
@@ -162,14 +182,24 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
         }
       } else {
         isPainting.current = true;
+        dispatch({ type: 'STROKE_START' });
         applyTool(cell.row, cell.col, activeTool, activeColor);
       }
     },
-    [activeTool, activeColor, width, height, dispatch, applyTool]
+    [activeTool, activeColor, width, height, dispatch, applyTool, getScrollContainer]
   );
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
+      if (isPanning.current && panStart.current) {
+        const container = getScrollContainer();
+        if (container) {
+          container.scrollLeft = panStart.current.scrollLeft - (e.clientX - panStart.current.x);
+          container.scrollTop = panStart.current.scrollTop - (e.clientY - panStart.current.y);
+        }
+        return;
+      }
+
       const canvas = canvasRef.current;
       if (!canvas) return;
       const cell = cellFromMouse(canvas, e, width, height);
@@ -182,11 +212,17 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
         applyTool(cell.row, cell.col, activeTool, activeColor);
       }
     },
-    [activeTool, activeColor, width, height, applyTool, draw]
+    [activeTool, activeColor, width, height, applyTool, draw, getScrollContainer]
   );
 
   const handleMouseUp = useCallback(
     (e: React.MouseEvent) => {
+      if (isPanning.current) {
+        isPanning.current = false;
+        panStart.current = null;
+        return;
+      }
+
       if (activeTool === 'select' && selectStart.current && selectCurrent.current) {
         const s = selectStart.current;
         const c = selectCurrent.current;
@@ -205,29 +241,41 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
         selectStart.current = null;
         selectCurrent.current = null;
       }
-      isPainting.current = false;
+      if (isPainting.current) {
+        isPainting.current = false;
+        dispatch({ type: 'STROKE_END' });
+      }
     },
     [activeTool, dispatch]
   );
 
   const handleMouseLeave = useCallback(() => {
-    isPainting.current = false;
+    if (isPanning.current) {
+      isPanning.current = false;
+      panStart.current = null;
+    }
+    if (isPainting.current) {
+      isPainting.current = false;
+      dispatch({ type: 'STROKE_END' });
+    }
     if (selectStart.current) {
       selectStart.current = null;
       selectCurrent.current = null;
       draw();
     }
-  }, [draw]);
+  }, [draw, dispatch]);
 
   const canvasWidth = width * CELL_SIZE;
   const canvasHeight = height * CELL_SIZE;
 
   const cursorStyle =
-    activeTool === 'pen'
-      ? 'crosshair'
-      : activeTool === 'eraser'
-        ? 'pointer'
-        : 'default';
+    activeTool === 'hand'
+      ? (isPanning.current ? 'grabbing' : 'grab')
+      : activeTool === 'pen'
+        ? 'crosshair'
+        : activeTool === 'eraser'
+          ? 'pointer'
+          : 'default';
 
   return (
     <canvas

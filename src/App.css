@@ -200,6 +200,13 @@
 }
 
 /* Color palette */
+.color-placeholder {
+  font-size: 0.8rem;
+  color: #888;
+  padding: 4px 0;
+  font-style: italic;
+}
+
 .color-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);

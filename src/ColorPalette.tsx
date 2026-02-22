@@ -10,6 +10,7 @@ export default function ColorPalette({ activeColor, dispatch }: ColorPaletteProp
   return (
     <div className="color-palette">
       <h3>Colors</h3>
+      {!activeColor && <div className="color-placeholder">Select color</div>}
       <div className="color-grid">
         {LEGO_COLORS.map((c) => (
           <button

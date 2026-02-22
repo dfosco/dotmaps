@@ -58,6 +58,13 @@ export default function Toolbar({
         <h3>Tools</h3>
         <div className="tool-buttons">
           <button
+            className={activeTool === 'hand' ? 'active' : ''}
+            onClick={() => dispatch({ type: 'SET_TOOL', tool: 'hand' })}
+            title="Hand / Pan (H)"
+          >
+            ✋ Hand
+          </button>
+          <button
             className={activeTool === 'pen' ? 'active' : ''}
             onClick={() => dispatch({ type: 'SET_TOOL', tool: 'pen' })}
             title="Pen (P)"
