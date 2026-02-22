@@ -1,4 +1,4 @@
-export type Tool = 'pen' | 'eraser' | 'select';
+export type Tool = 'hand' | 'pen' | 'eraser' | 'select';
 
 export type Cell = string | null; // hex color or null (empty)
 
@@ -21,6 +21,7 @@ export interface UndoableState {
   present: EditorState;
   past: EditorState[];
   future: EditorState[];
+  strokeAnchor?: EditorState;
 }
 
 export type EditorAction =
@@ -36,5 +37,7 @@ export type EditorAction =
   | { type: 'RESIZE'; width: number; height: number }
   | { type: 'LOAD_GRID'; grid: Grid; width: number; height: number }
   | { type: 'ROTATE_GRID'; direction: 'cw' | 'ccw' }
+  | { type: 'STROKE_START' }
+  | { type: 'STROKE_END' }
   | { type: 'UNDO' }
   | { type: 'REDO' };

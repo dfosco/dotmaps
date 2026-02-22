@@ -98,8 +98,9 @@ function closestLandColor(r: number, g: number, b: number): string {
   for (const pc of LAND_PALETTE) {
     let dist: number;
 
-    if (s < 0.08 || (s < 0.25 && l > 0.75)) {
-      // Near-achromatic or barely-colored very-light pixel: use RGB Euclidean distance
+    if (s < 0.08 || (l > 0.65 && s < 0.20 + (l - 0.65) * 2.0)) {
+      // Near-achromatic or light low-saturation pixel: use RGB Euclidean distance
+      // so ice/snow (h≈210, s≈0.30, l≈0.80) correctly matches white over green
       dist = ((r - pc.r) ** 2 + (g - pc.g) ** 2 + (b - pc.b) ** 2) / (255 * 255 * 3);
     } else {
       // Chromatic pixel: boost saturation to bridge the gap between
@@ -128,7 +129,7 @@ function isWaterPixel(r: number, g: number, b: number): boolean {
   if (l < 0.15) return true;
   // Blue/cyan hue range — require more saturation for lighter pixels
   // so ice/snow with a slight blue tint stays as land
-  if (h >= 170 && h <= 260 && s > 0.15 + Math.max(0, l - 0.5) * 0.8) return true;
+  if (h >= 170 && h <= 260 && s > 0.15 + Math.max(0, l - 0.5) * 1.4) return true;
   // Desaturated dark-to-mid tones with blue-ish tint
   if (l < 0.45 && s < 0.2 && b > r) return true;
   return false;
