@@ -1,3 +1,5 @@
+import { useRef } from 'react';
+import { config } from './config';
 import type { Tool, EditorAction, Selection } from './types';
 
 interface ToolbarProps {
@@ -8,8 +10,20 @@ interface ToolbarProps {
   height: number;
   dispatch: React.Dispatch<EditorAction>;
   onExport: () => void;
-  onSave: () => void;
-  onLoad: () => void;
+  zoom: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onZoomReset: () => void;
+  onImageUpload: (file: File) => void;
+  onExportList: () => void;
+  hasImportedImage: boolean;
+  resolution: number;
+  onResolutionChange: (maxDim: number) => void;
+  onRotate: (direction: 'cw' | 'ccw') => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }
 
 export default function Toolbar({
@@ -20,10 +34,23 @@ export default function Toolbar({
   height,
   dispatch,
   onExport,
-  onSave,
-  onLoad,
+  zoom,
+  onZoomIn,
+  onZoomOut,
+  onZoomReset,
+  onImageUpload,
+  onExportList,
+  hasImportedImage,
+  resolution,
+  onResolutionChange,
+  onRotate,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: ToolbarProps) {
   const hasSelection = selection.cells.size > 0;
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="toolbar">
@@ -51,6 +78,14 @@ export default function Toolbar({
           >
             ⬚ Select
           </button>
+        </div>
+      </div>
+
+      <div className="toolbar-group">
+        <h3>History</h3>
+        <div className="undo-redo-controls">
+          <button onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)">↩ Undo</button>
+          <button onClick={onRedo} disabled={!canRedo} title="Redo (⌘⇧Z)">↪ Redo</button>
         </div>
       </div>
 
@@ -113,13 +148,62 @@ export default function Toolbar({
       </div>
 
       <div className="toolbar-group">
-        <h3>File</h3>
-        <div className="tool-buttons">
-          <button onClick={onSave} title="Save to browser">💾 Save</button>
-          <button onClick={onLoad} title="Load from browser">📂 Load</button>
-          <button onClick={onExport} title="Export as PNG">📷 Export PNG</button>
+        <h3>Rotate</h3>
+        <div className="rotate-controls">
+          <button onClick={() => onRotate('ccw')} title="Rotate left 90°">↺ Left</button>
+          <button onClick={() => onRotate('cw')} title="Rotate right 90°">↻ Right</button>
         </div>
       </div>
+
+      <div className="toolbar-group">
+        <h3>Zoom</h3>
+        <div className="zoom-controls">
+          <button onClick={onZoomOut} title="Zoom out (-)">−</button>
+          <span className="zoom-level" onClick={onZoomReset} title="Reset zoom (0)">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button onClick={onZoomIn} title="Zoom in (+)">+</button>
+        </div>
+      </div>
+
+      <div className="toolbar-group">
+        <h3>File</h3>
+        <div className="tool-buttons">
+          <button onClick={onExport} title="Export as PNG">📷 Export PNG</button>
+          <button onClick={onExportList} title="Export parts list as Markdown">📋 Export List</button>
+          <button onClick={() => fileInputRef.current?.click()} title="Import image as dots">🖼️ Import Image</button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onImageUpload(file);
+              e.target.value = '';
+            }}
+          />
+        </div>
+      </div>
+
+      {hasImportedImage && (
+        <div className="toolbar-group">
+          <h3>Image Resolution</h3>
+          <div className="resolution-controls">
+            <input
+              type="range"
+              min={4}
+              max={Math.max(
+                config.fullPlate.width * config.basePlates.size[0],
+                config.fullPlate.height * config.basePlates.size[1],
+              )}
+              value={resolution}
+              onChange={(e) => onResolutionChange(parseInt(e.target.value))}
+            />
+            <span className="resolution-label">{resolution}px</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

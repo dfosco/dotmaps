@@ -1,19 +1,171 @@
-import { useReducer, useCallback, useEffect } from 'react';
-import { editorReducer, createInitialState } from './reducer';
+import { useReducer, useCallback, useEffect, useState, useRef, useMemo } from 'react';
+import { editorReducer, createInitialState, createGrid } from './reducer';
+import { imageToGrid, loadImageFile, getImageData, fixGridLimits, imageDataToBase64, base64ToImageData } from './imageToGrid';
+import { LEGO_COLORS } from './colors';
+import { config } from './config';
+import { loadTabs, saveTabs, loadFileData, saveFileData, deleteFileData, generateId, saveSourceImage, loadSourceImage } from './storage';
+import type { TabsState } from './storage';
 import CanvasEditor from './CanvasEditor';
 import ColorPalette from './ColorPalette';
 import Toolbar from './Toolbar';
+import TabBar from './TabBar';
 import './App.css';
 
-const STORAGE_KEY = 'dotmaps-save';
+// Full working area in dots (landscape and portrait)
+const PLATE_W = config.fullPlate.width * config.basePlates.size[0];
+const PLATE_H = config.fullPlate.height * config.basePlates.size[1];
+const FULL_LONG = Math.max(PLATE_W, PLATE_H);
+const FULL_SHORT = Math.min(PLATE_W, PLATE_H);
 
 function App() {
-  const [state, dispatch] = useReducer(editorReducer, undefined, () => createInitialState());
+  const [tabsState, setTabsState] = useState<TabsState>(() => {
+    const saved = loadTabs();
+    if (saved) return saved;
+    const id = generateId();
+    return { tabs: [{ id, name: 'Untitled' }], activeTabId: id };
+  });
+
+  const [undoable, dispatch] = useReducer(editorReducer, undefined, () => {
+    const fileData = loadFileData(tabsState.activeTabId);
+    if (fileData) return createInitialState(fileData.width, fileData.height, fileData.grid);
+    return createInitialState(PLATE_W, PLATE_H);
+  });
+
+  const state = undoable.present;
+
+  const [zoom, setZoom] = useState(1);
+  const importedImageRef = useRef<{ data: ImageData; aspect: number } | null>(null);
+  const [hasImportedImage, setHasImportedImage] = useState(false);
+  const [resolution, setResolution] = useState(FULL_LONG);
+  const [limitPieces, setLimitPieces] = useState(true);
+  const currentTabRef = useRef(tabsState.activeTabId);
+
+  // Restore source image on initial load
+  useEffect(() => {
+    const savedImg = loadSourceImage(currentTabRef.current);
+    if (savedImg) {
+      setHasImportedImage(true);
+      base64ToImageData(savedImg).then((data) => {
+        importedImageRef.current = { data, aspect: data.width / data.height };
+      }).catch(() => { /* corrupted data — ignore */ });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-save tabs metadata
+  useEffect(() => {
+    saveTabs(tabsState);
+  }, [tabsState]);
+
+  // Auto-save file data
+  useEffect(() => {
+    saveFileData(currentTabRef.current, {
+      grid: state.grid,
+      width: state.width,
+      height: state.height,
+    });
+  }, [state.grid, state.width, state.height]);
+
+  // Tab operations
+  const handleSelectTab = useCallback((id: string) => {
+    if (id === currentTabRef.current) return;
+    saveFileData(currentTabRef.current, {
+      grid: state.grid,
+      width: state.width,
+      height: state.height,
+    });
+    const fileData = loadFileData(id);
+    if (fileData) {
+      dispatch({ type: 'LOAD_GRID', grid: fileData.grid, width: fileData.width, height: fileData.height });
+    } else {
+      dispatch({ type: 'LOAD_GRID', grid: createGrid(PLATE_W, PLATE_H), width: PLATE_W, height: PLATE_H });
+    }
+    currentTabRef.current = id;
+    setTabsState(prev => ({ ...prev, activeTabId: id }));
+    // Restore source image if saved
+    const savedImg = loadSourceImage(id);
+    if (savedImg) {
+      setHasImportedImage(true);
+      base64ToImageData(savedImg).then((data) => {
+        importedImageRef.current = { data, aspect: data.width / data.height };
+      });
+    } else {
+      setHasImportedImage(false);
+      importedImageRef.current = null;
+    }
+  }, [state.grid, state.width, state.height]);
+
+  const handleNewTab = useCallback(() => {
+    saveFileData(currentTabRef.current, {
+      grid: state.grid,
+      width: state.width,
+      height: state.height,
+    });
+    const id = generateId();
+    dispatch({ type: 'LOAD_GRID', grid: createGrid(PLATE_W, PLATE_H), width: PLATE_W, height: PLATE_H });
+    currentTabRef.current = id;
+    setTabsState(prev => ({
+      tabs: [...prev.tabs, { id, name: 'Untitled' }],
+      activeTabId: id,
+    }));
+    setHasImportedImage(false);
+    importedImageRef.current = null;
+  }, [state.grid, state.width, state.height]);
+
+  const handleCloseTab = useCallback((id: string) => {
+    setTabsState(prev => {
+      const remaining = prev.tabs.filter(t => t.id !== id);
+
+      if (remaining.length === 0) {
+        const newId = generateId();
+        dispatch({ type: 'LOAD_GRID', grid: createGrid(PLATE_W, PLATE_H), width: PLATE_W, height: PLATE_H });
+        currentTabRef.current = newId;
+        deleteFileData(id);
+        return { tabs: [{ id: newId, name: 'Untitled' }], activeTabId: newId };
+      }
+
+      if (id === prev.activeTabId) {
+        const idx = prev.tabs.findIndex(t => t.id === id);
+        const newActive = remaining[Math.min(idx, remaining.length - 1)];
+        const fileData = loadFileData(newActive.id);
+        if (fileData) {
+          dispatch({ type: 'LOAD_GRID', grid: fileData.grid, width: fileData.width, height: fileData.height });
+        } else {
+          dispatch({ type: 'LOAD_GRID', grid: createGrid(PLATE_W, PLATE_H), width: PLATE_W, height: PLATE_H });
+        }
+        currentTabRef.current = newActive.id;
+        deleteFileData(id);
+        return { tabs: remaining, activeTabId: newActive.id };
+      }
+
+      deleteFileData(id);
+      return { ...prev, tabs: remaining };
+    });
+    setHasImportedImage(false);
+    importedImageRef.current = null;
+  }, []);
+
+  const handleRenameTab = useCallback((id: string, name: string) => {
+    setTabsState(prev => ({
+      ...prev,
+      tabs: prev.tabs.map(t => t.id === id ? { ...t, name } : t),
+    }));
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
+      // Undo / Redo
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        dispatch({ type: e.shiftKey ? 'REDO' : 'UNDO' });
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        dispatch({ type: 'REDO' });
+        return;
+      }
       switch (e.key.toLowerCase()) {
         case 'p':
           dispatch({ type: 'SET_TOOL', tool: 'pen' });
@@ -22,10 +174,7 @@ function App() {
           dispatch({ type: 'SET_TOOL', tool: 'eraser' });
           break;
         case 's':
-          if (e.metaKey || e.ctrlKey) {
-            e.preventDefault();
-            handleSave();
-          } else {
+          if (!(e.metaKey || e.ctrlKey)) {
             dispatch({ type: 'SET_TOOL', tool: 'select' });
           }
           break;
@@ -38,31 +187,21 @@ function App() {
         case 'escape':
           dispatch({ type: 'CLEAR_SELECTION' });
           break;
+        case '=':
+        case '+':
+          setZoom((z) => Math.min(8, z * 1.2));
+          break;
+        case '-':
+          setZoom((z) => Math.max(0.25, z / 1.2));
+          break;
+        case '0':
+          setZoom(1);
+          break;
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [state.selection.cells.size]);
-
-  const handleSave = useCallback(() => {
-    const data = { grid: state.grid, width: state.width, height: state.height };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    alert('Saved!');
-  }, [state.grid, state.width, state.height]);
-
-  const handleLoad = useCallback(() => {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      alert('No saved data found.');
-      return;
-    }
-    try {
-      const data = JSON.parse(raw);
-      dispatch({ type: 'LOAD_GRID', grid: data.grid, width: data.width, height: data.height });
-    } catch {
-      alert('Failed to load saved data.');
-    }
-  }, []);
 
   const handleExport = useCallback(() => {
     const canvas = document.querySelector('canvas');
@@ -73,12 +212,139 @@ function App() {
     link.click();
   }, []);
 
+  const handleZoomIn = useCallback(() => setZoom((z) => Math.min(8, z * 1.2)), []);
+  const handleZoomOut = useCallback(() => setZoom((z) => Math.max(0.25, z / 1.2)), []);
+  const handleZoomReset = useCallback(() => setZoom(1), []);
+
+  const handleImageUpload = useCallback(
+    async (file: File) => {
+      try {
+        const img = await loadImageFile(file);
+        const data = getImageData(img);
+        const aspect = img.width / img.height;
+        importedImageRef.current = { data, aspect };
+        setHasImportedImage(true);
+        setResolution(FULL_LONG);
+        // Save source image as base64 (best-effort, may exceed quota)
+        try {
+          saveSourceImage(currentTabRef.current, imageDataToBase64(data));
+        } catch {
+          // localStorage quota exceeded — source image won't persist across refresh
+        }
+        // Pick landscape or portrait based on image aspect ratio
+        const gw = aspect >= 1 ? FULL_LONG : FULL_SHORT;
+        const gh = aspect >= 1 ? FULL_SHORT : FULL_LONG;
+        let grid = imageToGrid(data, gw, gh);
+        if (limitPieces) grid = fixGridLimits(grid);
+        setLimitPieces(true);
+        dispatch({ type: 'LOAD_GRID', grid, width: gw, height: gh });
+      } catch (err) {
+        console.error('Image upload failed:', err);
+        alert('Failed to load image.');
+      }
+    },
+    [dispatch],
+  );
+
+  const handleResolutionChange = useCallback(
+    (detailRes: number) => {
+      const ref = importedImageRef.current;
+      if (!ref) return;
+      setResolution(detailRes);
+      const gw = state.width;
+      const gh = state.height;
+      const grid = imageToGrid(ref.data, gw, gh, detailRes);
+      dispatch({ type: 'LOAD_GRID', grid, width: gw, height: gh });
+    },
+    [dispatch, state.width, state.height],
+  );
+
+  const handleRotate = useCallback((direction: 'cw' | 'ccw') => {
+    dispatch({ type: 'ROTATE_GRID', direction });
+  }, [dispatch]);
+
+  const handleToggleLimits = useCallback((on: boolean) => {
+    setLimitPieces(on);
+    if (on) {
+      const fixed = fixGridLimits(state.grid);
+      dispatch({ type: 'LOAD_GRID', grid: fixed, width: state.width, height: state.height });
+    }
+  }, [state.grid, state.width, state.height, dispatch]);
+
+  const handleExportList = useCallback(() => {
+    const counts = new Map<string, number>();
+    let totalDots = 0;
+    for (let r = 0; r < state.height; r++) {
+      for (let c = 0; c < state.width; c++) {
+        const color = state.grid[r][c];
+        if (color) {
+          counts.set(color, (counts.get(color) ?? 0) + 1);
+          totalDots++;
+        }
+      }
+    }
+
+    const [bpW, bpH] = config.basePlates.size;
+    const basesNeeded = Math.ceil(
+      (state.width * state.height) / (bpW * bpH),
+    );
+
+    const colorLookup = new Map(LEGO_COLORS.map((c) => [c.hex, c.name]));
+    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+
+    let md = `# Dotmaps Parts List\n\n`;
+    md += `**Grid size:** ${state.width} × ${state.height}  \n`;
+    md += `**Base plates (${bpW}×${bpH}):** ${basesNeeded}  \n`;
+    md += `**Total dots:** ${totalDots}\n\n`;
+    md += `## Pieces by Color\n\n`;
+    md += `| Color | Hex | Count |\n`;
+    md += `|-------|-----|-------|\n`;
+    for (const [hex, count] of sorted) {
+      const name = colorLookup.get(hex) ?? 'Custom';
+      md += `| ${name} | \`${hex}\` | ${count} |\n`;
+    }
+
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const link = document.createElement('a');
+    link.download = 'dotmap-parts.md';
+    link.href = URL.createObjectURL(blob);
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }, [state.grid, state.width, state.height]);
+
+  // Compute color overages against config quantities
+  const colorOverages = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (let r = 0; r < state.height; r++) {
+      for (let c = 0; c < state.width; c++) {
+        const color = state.grid[r][c];
+        if (color) counts.set(color, (counts.get(color) ?? 0) + 1);
+      }
+    }
+    const overages: { name: string; hex: string; used: number; available: number }[] = [];
+    for (const cc of config.colors) {
+      const used = counts.get(cc.hex) ?? 0;
+      if (used > cc.quantity) {
+        overages.push({ name: cc.name, hex: cc.hex, used, available: cc.quantity });
+      }
+    }
+    return overages;
+  }, [state.grid, state.width, state.height]);
+
   return (
     <div className="app">
       <header className="app-header">
         <h1>🟡 Dotmaps</h1>
         <span className="subtitle">LEGO Dots Editor</span>
       </header>
+      <TabBar
+        tabs={tabsState.tabs}
+        activeTabId={tabsState.activeTabId}
+        onSelectTab={handleSelectTab}
+        onNewTab={handleNewTab}
+        onCloseTab={handleCloseTab}
+        onRenameTab={handleRenameTab}
+      />
       <div className="app-body">
         <aside className="sidebar">
           <ColorPalette activeColor={state.activeColor} dispatch={dispatch} />
@@ -90,12 +356,45 @@ function App() {
             height={state.height}
             dispatch={dispatch}
             onExport={handleExport}
-            onSave={handleSave}
-            onLoad={handleLoad}
+            zoom={zoom}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            onZoomReset={handleZoomReset}
+            onImageUpload={handleImageUpload}
+            onExportList={handleExportList}
+            hasImportedImage={hasImportedImage}
+            resolution={resolution}
+            onResolutionChange={handleResolutionChange}
+            onRotate={handleRotate}
+            canUndo={undoable.past.length > 0}
+            canRedo={undoable.future.length > 0}
+            onUndo={() => dispatch({ type: 'UNDO' })}
+            onRedo={() => dispatch({ type: 'REDO' })}
           />
+          <div className="toolbar-group">
+            <label className="limit-toggle">
+              <input
+                type="checkbox"
+                checked={limitPieces}
+                onChange={(e) => handleToggleLimits(e.target.checked)}
+              />
+              Limit pieces
+            </label>
+          </div>
+          {limitPieces && colorOverages.length > 0 && (
+            <div className="color-warning">
+              <strong>⚠ Dot limit exceeded:</strong>
+              {colorOverages.map((o) => (
+                <span key={o.hex} className="color-warning-item">
+                  <span className="color-warning-swatch" style={{ backgroundColor: o.hex }} />
+                  {o.name}: {o.used}/{o.available}
+                </span>
+              ))}
+            </div>
+          )}
         </aside>
         <main className="canvas-area">
-          <CanvasEditor state={state} dispatch={dispatch} />
+          <CanvasEditor state={state} dispatch={dispatch} zoom={zoom} onZoomChange={setZoom} />
         </main>
       </div>
     </div>

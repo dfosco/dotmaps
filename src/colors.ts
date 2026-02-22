@@ -1,32 +1,8 @@
-// Official LEGO Dots color palette (based on World Map set 31203 and common Dots sets)
-export const LEGO_COLORS: { name: string; hex: string }[] = [
-  { name: 'White', hex: '#FFFFFF' },
-  { name: 'Brick Yellow', hex: '#DEC69C' },
-  { name: 'Light Nougat', hex: '#FCC39E' },
-  { name: 'Nougat', hex: '#D09168' },
-  { name: 'Medium Nougat', hex: '#AA7D55' },
-  { name: 'Warm Gold', hex: '#DCA74B' },
-  { name: 'Flame Yellowish Orange', hex: '#F3A932' },
-  { name: 'Bright Orange', hex: '#F57B28' },
-  { name: 'Bright Red', hex: '#CB1220' },
-  { name: 'Dark Red', hex: '#80081B' },
-  { name: 'Vibrant Coral', hex: '#F56981' },
-  { name: 'Bright Purple', hex: '#CD3483' },
-  { name: 'Medium Lavender', hex: '#A06EB4' },
-  { name: 'Dark Purple', hex: '#5E1F7C' },
-  { name: 'Medium Blue', hex: '#478CC6' },
-  { name: 'Bright Blue', hex: '#0D69AB' },
-  { name: 'Dark Blue', hex: '#19325A' },
-  { name: 'Dark Azur', hex: '#00BCD9' },
-  { name: 'Medium Azur', hex: '#6BC6CE' },
-  { name: 'Aqua', hex: '#A3D8CB' },
-  { name: 'Bright Green', hex: '#00AF4D' },
-  { name: 'Bright Yellowish Green', hex: '#A6CA55' },
-  { name: 'Spring Yellowish Green', hex: '#C7D940' },
-  { name: 'Olive Green', hex: '#7C8A3C' },
-  { name: 'Dark Green', hex: '#00641E' },
-  { name: 'Sand Green', hex: '#76907A' },
-  { name: 'Medium Stone Grey', hex: '#A0A5A9' },
-  { name: 'Dark Stone Grey', hex: '#646765' },
-  { name: 'Black', hex: '#1B2A34' },
-];
+import { config } from './config';
+
+// Colors sourced from dotmaps.config.json
+export const LEGO_COLORS: { name: string; hex: string }[] = config.colors.map((c) => ({
+  name: c.name,
+  hex: c.hex,
+}));
+

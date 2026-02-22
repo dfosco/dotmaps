@@ -11,6 +11,8 @@ const SELECTION_STROKE = 'rgba(255, 255, 100, 0.9)';
 interface CanvasEditorProps {
   state: EditorState;
   dispatch: React.Dispatch<EditorAction>;
+  zoom: number;
+  onZoomChange: (zoom: number) => void;
 }
 
 function cellFromMouse(
@@ -30,7 +32,7 @@ function cellFromMouse(
   return { row, col };
 }
 
-export default function CanvasEditor({ state, dispatch }: CanvasEditorProps) {
+export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: CanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isPainting = useRef(false);
   const selectStart = useRef<{ row: number; col: number } | null>(null);
@@ -118,6 +120,21 @@ export default function CanvasEditor({ state, dispatch }: CanvasEditorProps) {
   useEffect(() => {
     draw();
   }, [draw]);
+
+  // Ctrl/Cmd + wheel zoom
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handler = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const factor = e.deltaY > 0 ? 0.9 : 1.1;
+        onZoomChange(Math.max(0.25, Math.min(8, zoom * factor)));
+      }
+    };
+    canvas.addEventListener('wheel', handler, { passive: false });
+    return () => canvas.removeEventListener('wheel', handler);
+  }, [zoom, onZoomChange]);
 
   const applyTool = useCallback(
     (row: number, col: number, tool: Tool, color: string) => {
@@ -220,9 +237,8 @@ export default function CanvasEditor({ state, dispatch }: CanvasEditorProps) {
       style={{
         cursor: cursorStyle,
         imageRendering: 'pixelated',
-        maxWidth: '100%',
-        maxHeight: 'calc(100vh - 80px)',
-        objectFit: 'contain',
+        width: canvasWidth * zoom,
+        height: canvasHeight * zoom,
       }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}

@@ -1,21 +1,30 @@
-import type { EditorState, EditorAction, Grid } from './types';
+import type { EditorState, EditorAction, Grid, UndoableState } from './types';
+
+const MAX_UNDO = 100;
+
+// Actions that modify the grid and should be undoable
+const UNDOABLE_ACTIONS = new Set([
+  'PAINT', 'ERASE', 'RECOLOR_SELECTION', 'DELETE_SELECTION',
+  'RESIZE', 'LOAD_GRID', 'ROTATE_GRID',
+]);
 
 export function createGrid(width: number, height: number): Grid {
   return Array.from({ length: height }, () => Array(width).fill(null));
 }
 
-export function createInitialState(width = 48, height = 48): EditorState {
-  return {
-    grid: createGrid(width, height),
+export function createInitialState(width = 48, height = 48, grid?: Grid): UndoableState {
+  const present: EditorState = {
+    grid: grid ?? createGrid(width, height),
     width,
     height,
-    activeColor: '#CB1220', // Bright Red
+    activeColor: '#CB1220',
     activeTool: 'pen',
     selection: { cells: new Set() },
   };
+  return { present, past: [], future: [] };
 }
 
-export function editorReducer(state: EditorState, action: EditorAction): EditorState {
+function coreReducer(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case 'PAINT': {
       const { row, col, color } = action;
@@ -94,7 +103,58 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         height: action.height,
         selection: { cells: new Set() },
       };
+    case 'ROTATE_GRID': {
+      const { width: oldW, height: oldH, grid: oldGrid } = state;
+      const newW = oldH;
+      const newH = oldW;
+      const grid = createGrid(newW, newH);
+      for (let r = 0; r < oldH; r++) {
+        for (let c = 0; c < oldW; c++) {
+          if (action.direction === 'cw') {
+            grid[c][oldH - 1 - r] = oldGrid[r][c];
+          } else {
+            grid[oldW - 1 - c][r] = oldGrid[r][c];
+          }
+        }
+      }
+      return { ...state, grid, width: newW, height: newH, selection: { cells: new Set() } };
+    }
     default:
       return state;
   }
+}
+
+export function editorReducer(undoable: UndoableState, action: EditorAction): UndoableState {
+  if (action.type === 'UNDO') {
+    if (undoable.past.length === 0) return undoable;
+    const previous = undoable.past[undoable.past.length - 1];
+    return {
+      past: undoable.past.slice(0, -1),
+      present: previous,
+      future: [undoable.present, ...undoable.future],
+    };
+  }
+
+  if (action.type === 'REDO') {
+    if (undoable.future.length === 0) return undoable;
+    const next = undoable.future[0];
+    return {
+      past: [...undoable.past, undoable.present],
+      present: next,
+      future: undoable.future.slice(1),
+    };
+  }
+
+  const newPresent = coreReducer(undoable.present, action);
+  if (newPresent === undoable.present) return undoable;
+
+  if (UNDOABLE_ACTIONS.has(action.type)) {
+    return {
+      past: [...undoable.past.slice(-MAX_UNDO + 1), undoable.present],
+      present: newPresent,
+      future: [],
+    };
+  }
+
+  return { ...undoable, present: newPresent };
 }

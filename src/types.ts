@@ -17,6 +17,12 @@ export interface EditorState {
   selection: Selection;
 }
 
+export interface UndoableState {
+  present: EditorState;
+  past: EditorState[];
+  future: EditorState[];
+}
+
 export type EditorAction =
   | { type: 'PAINT'; row: number; col: number; color: string }
   | { type: 'ERASE'; row: number; col: number }
@@ -28,4 +34,7 @@ export type EditorAction =
   | { type: 'RECOLOR_SELECTION'; color: string }
   | { type: 'DELETE_SELECTION' }
   | { type: 'RESIZE'; width: number; height: number }
-  | { type: 'LOAD_GRID'; grid: Grid; width: number; height: number };
+  | { type: 'LOAD_GRID'; grid: Grid; width: number; height: number }
+  | { type: 'ROTATE_GRID'; direction: 'cw' | 'ccw' }
+  | { type: 'UNDO' }
+  | { type: 'REDO' };
