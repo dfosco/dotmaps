@@ -1,4 +1,5 @@
 import { useRef, useEffect, useCallback } from 'react';
+import { config } from './config';
 import type { EditorState, EditorAction, Tool } from './types';
 
 const CELL_SIZE = 16;
@@ -7,32 +8,75 @@ const BG_COLOR = '#2C2C2C';
 const GRID_COLOR = '#3A3A3A';
 const SELECTION_COLOR = 'rgba(255, 255, 100, 0.5)';
 const SELECTION_STROKE = 'rgba(255, 255, 100, 0.9)';
+const PLATE_GAP = 4;
+const PLATE_BG = '#222230';
+const PLATE_BORDER = '#555';
+const PLATE_LABEL_COLOR = '#666';
+
+const [PLATE_W, PLATE_H] = config.basePlates.size;
 
 interface CanvasEditorProps {
   state: EditorState;
   dispatch: React.Dispatch<EditorAction>;
   zoom: number;
   onZoomChange: (zoom: number) => void;
+  showBasePlates: boolean;
+}
+
+// Compute pixel offset for a grid cell accounting for plate gaps
+function cellToPixel(col: number, row: number, showPlates: boolean): { px: number; py: number } {
+  if (!showPlates) return { px: col * CELL_SIZE, py: row * CELL_SIZE };
+  const plateCol = Math.floor(col / PLATE_W);
+  const plateRow = Math.floor(row / PLATE_H);
+  return {
+    px: col * CELL_SIZE + plateCol * PLATE_GAP,
+    py: row * CELL_SIZE + plateRow * PLATE_GAP,
+  };
+}
+
+function canvasDims(gridW: number, gridH: number, showPlates: boolean): { w: number; h: number } {
+  if (!showPlates) return { w: gridW * CELL_SIZE, h: gridH * CELL_SIZE };
+  const platesX = Math.ceil(gridW / PLATE_W);
+  const platesY = Math.ceil(gridH / PLATE_H);
+  return {
+    w: gridW * CELL_SIZE + (platesX - 1) * PLATE_GAP,
+    h: gridH * CELL_SIZE + (platesY - 1) * PLATE_GAP,
+  };
 }
 
 function cellFromMouse(
   canvas: HTMLCanvasElement,
   e: React.MouseEvent | MouseEvent,
   width: number,
-  height: number
+  height: number,
+  showPlates: boolean,
 ): { row: number; col: number } | null {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
   const x = (e.clientX - rect.left) * scaleX;
   const y = (e.clientY - rect.top) * scaleY;
-  const col = Math.floor(x / CELL_SIZE);
-  const row = Math.floor(y / CELL_SIZE);
+
+  let col: number, row: number;
+  if (showPlates) {
+    const plateStepX = PLATE_W * CELL_SIZE + PLATE_GAP;
+    const plateStepY = PLATE_H * CELL_SIZE + PLATE_GAP;
+    const plateCol = Math.floor(x / plateStepX);
+    const plateRow = Math.floor(y / plateStepY);
+    const localX = x - plateCol * plateStepX;
+    const localY = y - plateRow * plateStepY;
+    if (localX >= PLATE_W * CELL_SIZE || localY >= PLATE_H * CELL_SIZE) return null; // in gap
+    col = plateCol * PLATE_W + Math.floor(localX / CELL_SIZE);
+    row = plateRow * PLATE_H + Math.floor(localY / CELL_SIZE);
+  } else {
+    col = Math.floor(x / CELL_SIZE);
+    row = Math.floor(y / CELL_SIZE);
+  }
   if (row < 0 || row >= height || col < 0 || col >= width) return null;
   return { row, col };
 }
 
-export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: CanvasEditorProps) {
+export default function CanvasEditor({ state, dispatch, zoom, onZoomChange, showBasePlates }: CanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isPainting = useRef(false);
   const isPanning = useRef(false);
@@ -49,29 +93,48 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const w = width * CELL_SIZE;
-    const h = height * CELL_SIZE;
-    canvas.width = w;
-    canvas.height = h;
+    const dims = canvasDims(width, height, showBasePlates);
+    canvas.width = dims.w;
+    canvas.height = dims.h;
 
     // Background
-    ctx.fillStyle = BG_COLOR;
-    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = showBasePlates ? '#111118' : BG_COLOR;
+    ctx.fillRect(0, 0, dims.w, dims.h);
+
+    if (showBasePlates) {
+      // Draw plate backgrounds
+      const platesX = Math.ceil(width / PLATE_W);
+      const platesY = Math.ceil(height / PLATE_H);
+      let plateNum = 1;
+      for (let py = 0; py < platesY; py++) {
+        for (let px = 0; px < platesX; px++) {
+          const ox = px * (PLATE_W * CELL_SIZE + PLATE_GAP);
+          const oy = py * (PLATE_H * CELL_SIZE + PLATE_GAP);
+          const pw = Math.min(PLATE_W, width - px * PLATE_W) * CELL_SIZE;
+          const ph = Math.min(PLATE_H, height - py * PLATE_H) * CELL_SIZE;
+          ctx.fillStyle = PLATE_BG;
+          ctx.fillRect(ox, oy, pw, ph);
+          ctx.strokeStyle = PLATE_BORDER;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(ox + 0.5, oy + 0.5, pw - 1, ph - 1);
+          // Plate number label
+          ctx.fillStyle = PLATE_LABEL_COLOR;
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(plateNum++), ox + pw / 2, oy + ph / 2);
+        }
+      }
+    }
 
     // Grid lines
     ctx.strokeStyle = GRID_COLOR;
     ctx.lineWidth = 0.5;
-    for (let r = 0; r <= height; r++) {
-      ctx.beginPath();
-      ctx.moveTo(0, r * CELL_SIZE);
-      ctx.lineTo(w, r * CELL_SIZE);
-      ctx.stroke();
-    }
-    for (let c = 0; c <= width; c++) {
-      ctx.beginPath();
-      ctx.moveTo(c * CELL_SIZE, 0);
-      ctx.lineTo(c * CELL_SIZE, h);
-      ctx.stroke();
+    for (let r = 0; r < height; r++) {
+      for (let c = 0; c < width; c++) {
+        const { px, py } = cellToPixel(c, r, showBasePlates);
+        ctx.strokeRect(px, py, CELL_SIZE, CELL_SIZE);
+      }
     }
 
     // Dots
@@ -79,8 +142,9 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
       for (let c = 0; c < width; c++) {
         const color = grid[r][c];
         if (color) {
-          const cx = c * CELL_SIZE + CELL_SIZE / 2;
-          const cy = r * CELL_SIZE + CELL_SIZE / 2;
+          const { px, py } = cellToPixel(c, r, showBasePlates);
+          const cx = px + CELL_SIZE / 2;
+          const cy = py + CELL_SIZE / 2;
           ctx.fillStyle = color;
           ctx.beginPath();
           ctx.arc(cx, cy, DOT_RADIUS, 0, Math.PI * 2);
@@ -92,8 +156,9 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
     // Selection highlights
     for (const key of selection.cells) {
       const [rs, cs] = key.split(',').map(Number);
-      const cx = cs * CELL_SIZE + CELL_SIZE / 2;
-      const cy = rs * CELL_SIZE + CELL_SIZE / 2;
+      const { px, py } = cellToPixel(cs, rs, showBasePlates);
+      const cx = px + CELL_SIZE / 2;
+      const cy = py + CELL_SIZE / 2;
       ctx.fillStyle = SELECTION_COLOR;
       ctx.beginPath();
       ctx.arc(cx, cy, DOT_RADIUS + 1, 0, Math.PI * 2);
@@ -107,17 +172,15 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
     if (activeTool === 'select' && selectStart.current && selectCurrent.current) {
       const s = selectStart.current;
       const e = selectCurrent.current;
-      const x1 = Math.min(s.col, e.col) * CELL_SIZE;
-      const y1 = Math.min(s.row, e.row) * CELL_SIZE;
-      const x2 = (Math.max(s.col, e.col) + 1) * CELL_SIZE;
-      const y2 = (Math.max(s.row, e.row) + 1) * CELL_SIZE;
+      const p1 = cellToPixel(Math.min(s.col, e.col), Math.min(s.row, e.row), showBasePlates);
+      const p2 = cellToPixel(Math.max(s.col, e.col), Math.max(s.row, e.row), showBasePlates);
       ctx.strokeStyle = SELECTION_STROKE;
       ctx.lineWidth = 2;
       ctx.setLineDash([4, 4]);
-      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      ctx.strokeRect(p1.px, p1.py, p2.px + CELL_SIZE - p1.px, p2.py + CELL_SIZE - p1.py);
       ctx.setLineDash([]);
     }
-  }, [grid, width, height, activeTool, selection]);
+  }, [grid, width, height, activeTool, selection, showBasePlates]);
 
   useEffect(() => {
     draw();
@@ -171,7 +234,7 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
         return;
       }
 
-      const cell = cellFromMouse(canvas, e, width, height);
+      const cell = cellFromMouse(canvas, e, width, height, showBasePlates);
       if (!cell) return;
 
       if (activeTool === 'select') {
@@ -186,7 +249,7 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
         applyTool(cell.row, cell.col, activeTool, activeColor);
       }
     },
-    [activeTool, activeColor, width, height, dispatch, applyTool, getScrollContainer]
+    [activeTool, activeColor, width, height, dispatch, applyTool, getScrollContainer, showBasePlates]
   );
 
   const handleMouseMove = useCallback(
@@ -202,7 +265,7 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
 
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const cell = cellFromMouse(canvas, e, width, height);
+      const cell = cellFromMouse(canvas, e, width, height, showBasePlates);
       if (!cell) return;
 
       if (activeTool === 'select' && selectStart.current) {
@@ -212,7 +275,7 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
         applyTool(cell.row, cell.col, activeTool, activeColor);
       }
     },
-    [activeTool, activeColor, width, height, applyTool, draw, getScrollContainer]
+    [activeTool, activeColor, width, height, applyTool, draw, getScrollContainer, showBasePlates]
   );
 
   const handleMouseUp = useCallback(
@@ -265,8 +328,7 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
     }
   }, [draw, dispatch]);
 
-  const canvasWidth = width * CELL_SIZE;
-  const canvasHeight = height * CELL_SIZE;
+  const dims = canvasDims(width, height, showBasePlates);
 
   const cursorStyle =
     activeTool === 'hand'
@@ -280,13 +342,13 @@ export default function CanvasEditor({ state, dispatch, zoom, onZoomChange }: Ca
   return (
     <canvas
       ref={canvasRef}
-      width={canvasWidth}
-      height={canvasHeight}
+      width={dims.w}
+      height={dims.h}
       style={{
         cursor: cursorStyle,
         imageRendering: 'pixelated',
-        width: canvasWidth * zoom,
-        height: canvasHeight * zoom,
+        width: dims.w * zoom,
+        height: dims.h * zoom,
       }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}

@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { config } from './config';
 import type { Tool, EditorAction, Selection } from './types';
+import type { RenderOptions } from './imageToGrid';
 
 interface ToolbarProps {
   activeTool: Tool;
@@ -24,6 +25,10 @@ interface ToolbarProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  renderOptions: RenderOptions;
+  onRenderOptionsChange: (opts: RenderOptions) => void;
+  showBasePlates: boolean;
+  onToggleBasePlates: (show: boolean) => void;
 }
 
 export default function Toolbar({
@@ -48,6 +53,10 @@ export default function Toolbar({
   canRedo,
   onUndo,
   onRedo,
+  renderOptions,
+  onRenderOptionsChange,
+  showBasePlates,
+  onToggleBasePlates,
 }: ToolbarProps) {
   const hasSelection = selection.cells.size > 0;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -211,6 +220,51 @@ export default function Toolbar({
           </div>
         </div>
       )}
+
+      {hasImportedImage && (
+        <details className="advanced-options">
+          <summary><h3>Advanced Options</h3></summary>
+          <div className="advanced-options-body">
+            <label className="option-row">
+              <span>Water Depth</span>
+              <input type="range" min={0} max={100} value={renderOptions.waterDepth}
+                onChange={(e) => onRenderOptionsChange({ ...renderOptions, waterDepth: parseInt(e.target.value) })} />
+              <span className="option-value">{renderOptions.waterDepth}</span>
+            </label>
+            <label className="option-row option-toggle">
+              <input type="checkbox" checked={renderOptions.includeBlack}
+                onChange={(e) => onRenderOptionsChange({ ...renderOptions, includeBlack: e.target.checked })} />
+              <span>Include Black in Water</span>
+            </label>
+            <label className="option-row">
+              <span>Color Vibrancy</span>
+              <input type="range" min={0} max={100} value={renderOptions.colorVibrancy}
+                onChange={(e) => onRenderOptionsChange({ ...renderOptions, colorVibrancy: parseInt(e.target.value) })} />
+              <span className="option-value">{renderOptions.colorVibrancy}</span>
+            </label>
+            <label className="option-row">
+              <span>Coastline Width</span>
+              <input type="range" min={0} max={100} value={renderOptions.coastlineWidth}
+                onChange={(e) => onRenderOptionsChange({ ...renderOptions, coastlineWidth: parseInt(e.target.value) })} />
+              <span className="option-value">{renderOptions.coastlineWidth}</span>
+            </label>
+            <label className="option-row">
+              <span>Water Sensitivity</span>
+              <input type="range" min={0} max={100} value={renderOptions.waterSensitivity}
+                onChange={(e) => onRenderOptionsChange({ ...renderOptions, waterSensitivity: parseInt(e.target.value) })} />
+              <span className="option-value">{renderOptions.waterSensitivity}</span>
+            </label>
+          </div>
+        </details>
+      )}
+
+      <div className="toolbar-group">
+        <label className="limit-toggle">
+          <input type="checkbox" checked={showBasePlates}
+            onChange={(e) => onToggleBasePlates(e.target.checked)} />
+          Show base plates
+        </label>
+      </div>
     </div>
   );
 }

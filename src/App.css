@@ -393,3 +393,83 @@
   min-width: 40px;
   text-align: right;
 }
+
+/* Advanced options accordion */
+.advanced-options {
+  margin-top: 4px;
+}
+
+.advanced-options summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.advanced-options summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-options summary h3 {
+  display: inline;
+  margin: 0;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #aaa;
+}
+
+.advanced-options summary h3::before {
+  content: '▸ ';
+}
+
+.advanced-options[open] summary h3::before {
+  content: '▾ ';
+}
+
+.advanced-options-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.option-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.option-row span:first-child {
+  width: 100%;
+  color: #aaa;
+}
+
+.option-row input[type="range"] {
+  flex: 1;
+  accent-color: #7a7aff;
+}
+
+.option-value {
+  min-width: 24px;
+  text-align: right;
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.option-toggle {
+  flex-wrap: nowrap;
+}
+
+.option-toggle input[type="checkbox"] {
+  accent-color: #7a7aff;
+  width: 14px;
+  height: 14px;
+}
+
+.option-toggle span {
+  width: auto !important;
+}

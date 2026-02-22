@@ -1,6 +1,7 @@
 import { useReducer, useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { editorReducer, createInitialState, createGrid } from './reducer';
-import { imageToGrid, loadImageFile, getImageData, fixGridLimits, imageDataToBase64, base64ToImageData } from './imageToGrid';
+import { imageToGrid, loadImageFile, getImageData, fixGridLimits, imageDataToBase64, base64ToImageData, DEFAULT_RENDER_OPTIONS } from './imageToGrid';
+import type { RenderOptions } from './imageToGrid';
 import { LEGO_COLORS } from './colors';
 import { config } from './config';
 import { loadTabs, saveTabs, loadFileData, saveFileData, deleteFileData, generateId, saveSourceImage, loadSourceImage, saveZoom, loadZoom } from './storage';
@@ -52,6 +53,8 @@ function App() {
   const [limitPieces, setLimitPieces] = useState(true);
   const currentTabRef = useRef(tabsState.activeTabId);
   const didInitialFit = useRef(false);
+  const [renderOptions, setRenderOptions] = useState<RenderOptions>({ ...DEFAULT_RENDER_OPTIONS });
+  const [showBasePlates, setShowBasePlates] = useState(false);
 
   // Fit zoom to view on initial mount (if no saved zoom)
   useEffect(() => {
@@ -279,7 +282,7 @@ function App() {
         // Pick landscape or portrait based on image aspect ratio
         const gw = aspect >= 1 ? FULL_LONG : FULL_SHORT;
         const gh = aspect >= 1 ? FULL_SHORT : FULL_LONG;
-        let grid = imageToGrid(data, gw, gh);
+        let grid = imageToGrid(data, gw, gh, undefined, renderOptions);
         if (limitPieces) grid = fixGridLimits(grid);
         setLimitPieces(true);
         dispatch({ type: 'LOAD_GRID', grid, width: gw, height: gh });
@@ -299,10 +302,24 @@ function App() {
       setResolution(detailRes);
       const gw = state.width;
       const gh = state.height;
-      const grid = imageToGrid(ref.data, gw, gh, detailRes);
+      const grid = imageToGrid(ref.data, gw, gh, detailRes, renderOptions);
       dispatch({ type: 'LOAD_GRID', grid, width: gw, height: gh });
     },
     [dispatch, state.width, state.height],
+  );
+
+  const handleRenderOptionsChange = useCallback(
+    (opts: RenderOptions) => {
+      setRenderOptions(opts);
+      const ref = importedImageRef.current;
+      if (!ref) return;
+      const gw = state.width;
+      const gh = state.height;
+      let grid = imageToGrid(ref.data, gw, gh, resolution < Math.max(gw, gh) ? resolution : undefined, opts);
+      if (limitPieces) grid = fixGridLimits(grid);
+      dispatch({ type: 'LOAD_GRID', grid, width: gw, height: gh });
+    },
+    [dispatch, state.width, state.height, resolution, limitPieces],
   );
 
   const handleRotate = useCallback((direction: 'cw' | 'ccw') => {
@@ -416,6 +433,10 @@ function App() {
             canRedo={undoable.future.length > 0}
             onUndo={() => dispatch({ type: 'UNDO' })}
             onRedo={() => dispatch({ type: 'REDO' })}
+            renderOptions={renderOptions}
+            onRenderOptionsChange={handleRenderOptionsChange}
+            showBasePlates={showBasePlates}
+            onToggleBasePlates={setShowBasePlates}
           />
           <div className="toolbar-group">
             <label className="limit-toggle">
@@ -440,7 +461,7 @@ function App() {
           )}
         </aside>
         <main className="canvas-area" ref={canvasAreaRef}>
-          <CanvasEditor state={state} dispatch={dispatch} zoom={zoom} onZoomChange={setZoom} />
+          <CanvasEditor state={state} dispatch={dispatch} zoom={zoom} onZoomChange={setZoom} showBasePlates={showBasePlates} />
         </main>
       </div>
     </div>
