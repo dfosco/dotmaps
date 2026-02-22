@@ -3,7 +3,7 @@ import { editorReducer, createInitialState, createGrid } from './reducer';
 import { imageToGrid, loadImageFile, getImageData, fixGridLimits, imageDataToBase64, base64ToImageData } from './imageToGrid';
 import { LEGO_COLORS } from './colors';
 import { config } from './config';
-import { loadTabs, saveTabs, loadFileData, saveFileData, deleteFileData, generateId, saveSourceImage, loadSourceImage } from './storage';
+import { loadTabs, saveTabs, loadFileData, saveFileData, deleteFileData, generateId, saveSourceImage, loadSourceImage, saveZoom, loadZoom } from './storage';
 import type { TabsState } from './storage';
 import CanvasEditor from './CanvasEditor';
 import ColorPalette from './ColorPalette';
@@ -16,6 +16,17 @@ const PLATE_W = config.fullPlate.width * config.basePlates.size[0];
 const PLATE_H = config.fullPlate.height * config.basePlates.size[1];
 const FULL_LONG = Math.max(PLATE_W, PLATE_H);
 const FULL_SHORT = Math.min(PLATE_W, PLATE_H);
+const CELL_SIZE = 16; // must match CanvasEditor
+
+function computeFitZoom(gridW: number, gridH: number, container: HTMLElement | null): number {
+  if (!container) return 1;
+  const pad = 40; // 20px padding on each side
+  const availW = container.clientWidth - pad;
+  const availH = container.clientHeight - pad;
+  const canvasW = gridW * CELL_SIZE;
+  const canvasH = gridH * CELL_SIZE;
+  return Math.max(0.25, Math.min(8, Math.min(availW / canvasW, availH / canvasH)));
+}
 
 function App() {
   const [tabsState, setTabsState] = useState<TabsState>(() => {
@@ -33,12 +44,32 @@ function App() {
 
   const state = undoable.present;
 
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(() => loadZoom(tabsState.activeTabId) ?? 1);
+  const canvasAreaRef = useRef<HTMLElement>(null);
   const importedImageRef = useRef<{ data: ImageData; aspect: number } | null>(null);
   const [hasImportedImage, setHasImportedImage] = useState(false);
   const [resolution, setResolution] = useState(FULL_LONG);
   const [limitPieces, setLimitPieces] = useState(true);
   const currentTabRef = useRef(tabsState.activeTabId);
+  const didInitialFit = useRef(false);
+
+  // Fit zoom to view on initial mount (if no saved zoom)
+  useEffect(() => {
+    if (didInitialFit.current) return;
+    didInitialFit.current = true;
+    const saved = loadZoom(currentTabRef.current);
+    if (saved) return; // respect saved zoom
+    // Wait a frame for layout
+    requestAnimationFrame(() => {
+      const fit = computeFitZoom(state.width, state.height, canvasAreaRef.current);
+      setZoom(fit);
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save zoom whenever it changes
+  useEffect(() => {
+    saveZoom(currentTabRef.current, zoom);
+  }, [zoom]);
 
   // Restore source image on initial load
   useEffect(() => {
@@ -81,6 +112,16 @@ function App() {
     }
     currentTabRef.current = id;
     setTabsState(prev => ({ ...prev, activeTabId: id }));
+    // Restore zoom or fit-to-view
+    const savedZoom = loadZoom(id);
+    if (savedZoom) {
+      setZoom(savedZoom);
+    } else {
+      const fd = loadFileData(id);
+      const gw = fd?.width ?? PLATE_W;
+      const gh = fd?.height ?? PLATE_H;
+      requestAnimationFrame(() => setZoom(computeFitZoom(gw, gh, canvasAreaRef.current)));
+    }
     // Restore source image if saved
     const savedImg = loadSourceImage(id);
     if (savedImg) {
@@ -109,6 +150,7 @@ function App() {
     }));
     setHasImportedImage(false);
     importedImageRef.current = null;
+    requestAnimationFrame(() => setZoom(computeFitZoom(PLATE_W, PLATE_H, canvasAreaRef.current)));
   }, [state.grid, state.width, state.height]);
 
   const handleCloseTab = useCallback((id: string) => {
@@ -241,6 +283,7 @@ function App() {
         if (limitPieces) grid = fixGridLimits(grid);
         setLimitPieces(true);
         dispatch({ type: 'LOAD_GRID', grid, width: gw, height: gh });
+        requestAnimationFrame(() => setZoom(computeFitZoom(gw, gh, canvasAreaRef.current)));
       } catch (err) {
         console.error('Image upload failed:', err);
         alert('Failed to load image.');
@@ -396,7 +439,7 @@ function App() {
             </div>
           )}
         </aside>
-        <main className="canvas-area">
+        <main className="canvas-area" ref={canvasAreaRef}>
           <CanvasEditor state={state} dispatch={dispatch} zoom={zoom} onZoomChange={setZoom} />
         </main>
       </div>
