@@ -260,6 +260,49 @@ function App() {
     link.click();
   }, []);
 
+  const handleExportJSON = useCallback(() => {
+    const tab = tabsState.tabs.find(t => t.id === currentTabRef.current);
+    const payload = {
+      version: 1,
+      name: tab?.name ?? 'Untitled',
+      width: state.width,
+      height: state.height,
+      grid: state.grid,
+      renderOptions,
+      limitPieces,
+      resolution,
+      showBasePlates,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.download = `${payload.name.replace(/[^a-z0-9_-]/gi, '_')}.dotmap.json`;
+    link.href = URL.createObjectURL(blob);
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }, [state.grid, state.width, state.height, renderOptions, limitPieces, resolution, showBasePlates, tabsState.tabs]);
+
+  const handleImportJSON = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result as string);
+        if (!data.grid || !data.width || !data.height) throw new Error('Invalid file');
+        dispatch({ type: 'LOAD_GRID', grid: data.grid, width: data.width, height: data.height });
+        if (data.renderOptions) setRenderOptions(data.renderOptions);
+        if (typeof data.limitPieces === 'boolean') setLimitPieces(data.limitPieces);
+        if (typeof data.resolution === 'number') setResolution(data.resolution);
+        if (typeof data.showBasePlates === 'boolean') setShowBasePlates(data.showBasePlates);
+        if (data.name) {
+          handleRenameTab(currentTabRef.current, data.name);
+        }
+        requestAnimationFrame(() => setZoom(computeFitZoom(data.width, data.height, canvasAreaRef.current)));
+      } catch {
+        alert('Failed to load .dotmap.json file.');
+      }
+    };
+    reader.readAsText(file);
+  }, [dispatch, handleRenameTab]);
+
   const handleZoomIn = useCallback(() => setZoom((z) => Math.min(8, z * 1.2)), []);
   const handleZoomOut = useCallback(() => setZoom((z) => Math.max(0.25, z / 1.2)), []);
   const handleZoomReset = useCallback(() => setZoom(1), []);
@@ -419,6 +462,8 @@ function App() {
             height={state.height}
             dispatch={dispatch}
             onExport={handleExport}
+            onExportJSON={handleExportJSON}
+            onImportJSON={handleImportJSON}
             zoom={zoom}
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}

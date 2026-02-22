@@ -11,6 +11,8 @@ interface ToolbarProps {
   height: number;
   dispatch: React.Dispatch<EditorAction>;
   onExport: () => void;
+  onExportJSON: () => void;
+  onImportJSON: (file: File) => void;
   zoom: number;
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -39,6 +41,8 @@ export default function Toolbar({
   height,
   dispatch,
   onExport,
+  onExportJSON,
+  onImportJSON,
   zoom,
   onZoomIn,
   onZoomOut,
@@ -60,6 +64,7 @@ export default function Toolbar({
 }: ToolbarProps) {
   const hasSelection = selection.cells.size > 0;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const jsonInputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="toolbar">
@@ -187,7 +192,9 @@ export default function Toolbar({
         <div className="tool-buttons">
           <button onClick={onExport} title="Export as PNG">📷 Export PNG</button>
           <button onClick={onExportList} title="Export parts list as Markdown">📋 Export List</button>
+          <button onClick={onExportJSON} title="Export project as JSON">💾 Export Project</button>
           <button onClick={() => fileInputRef.current?.click()} title="Import image as dots">🖼️ Import Image</button>
+          <button onClick={() => jsonInputRef.current?.click()} title="Import .dotmap.json project">📂 Import Project</button>
           <input
             ref={fileInputRef}
             type="file"
@@ -196,6 +203,17 @@ export default function Toolbar({
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) onImageUpload(file);
+              e.target.value = '';
+            }}
+          />
+          <input
+            ref={jsonInputRef}
+            type="file"
+            accept=".json,.dotmap.json"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onImportJSON(file);
               e.target.value = '';
             }}
           />
