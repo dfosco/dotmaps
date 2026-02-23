@@ -1,73 +1,48 @@
-# React + TypeScript + Vite
+# 🟡 Dotmaps
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A visual editor for building pixel-art maps using LEGO Dots on base plates.
 
-Currently, two official plugins are available:
+**[Open Dotmaps →](https://dfosco.github.io/dotmaps/)**
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## What it does
 
-## React Compiler
+Import an image and Dotmaps converts it into a dot grid using a constrained palette of 11 physical colors on 16×16 base plates. The algorithm is map-aware — it detects water and land masses, applies a dithered depth gradient to oceans, and uses saturation-boosted color matching for land areas.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Features
 
-## Expanding the ESLint configuration
+- **Image import** with automatic landscape/portrait detection
+- **Map-aware color algorithm** — water gradient (black → dark blue → turquoise → light blue), land color matching with saturation boost, ice/snow detection
+- **Dot quantity limits** — toggle to enforce available piece counts with priority-based global distribution
+- **Advanced rendering options** — water depth, color vibrancy, coastline width, water sensitivity, black in water toggle
+- **Base plates overlay** — visualize 16×16 plate boundaries with numbered labels
+- **Tabs** with auto-save to localStorage
+- **Undo/redo** with stroke batching (⌘Z / ⌘⇧Z)
+- **Hand/pan tool**, pen, eraser, rectangle select
+- **Zoom** — fit-to-view on load, Ctrl+scroll, persisted per tab
+- **Export** — PNG, parts list (Markdown), project file (.dotmap.json)
+- **Import** — images (any format) and .dotmap.json project files
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Configuration
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+Edit `dotmaps.config.json` to change available colors, quantities, and base plate layout:
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```json
+{
+  "basePlates": { "size": [16, 16], "quantity": 40 },
+  "fullPlate": { "width": 8, "height": 5 },
+  "colors": [
+    { "id": 1, "name": "white", "hex": "#EAECE7", "quantity": 3064 },
+    ...
+  ]
+}
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Development
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev      # dev server at localhost:5173
+npm run build    # production build to dist/
 ```
+
+Built with React, TypeScript, Vite, and Canvas API.
